@@ -1,0 +1,218 @@
+---
+title: "HW2"
+author: "Dinesh Kodwani"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,cache=TRUE)
+```
+
+#Preliminary
+
+```{r}
+if(!is.element("rstan",installed.packages())) install.packages("rstan")
+library(rstan)
+```
+
+# Problem 1
+
+A)  Replicate the Bayesian analysis from the end of class, estimating the population mean and standard deviation of `log(income)` from the [dataset]() `acsSample.csv`. The [current version]() of `meanLogInc.stan` in the `notes` folder is somewhat different than what we saw in class--now it takes the prior mean and variance for `mu` as data inputs. To replicate the analysis with the current `stan` file, first run the following (if `acsSample.csv` is saved in a different folder than this file, adjust the file path):
+
+```{r}
+ourSample <- read.csv("acsSample.csv")
+stanData <- 
+  list(
+    N = nrow(ourSample),
+    logIncome=log(ourSample$income),
+    priorMean=log(50000),
+    priorSD=5)
+```
+
+```{r}
+# Put code here
+mod <- stan("meanLogInc.stan",data=stanData)
+traceplot(mod)
+print(mod)
+```
+
+B)  Examine the role of the prior distribution by experimenting with different prior means and variances and examining the results. What does it take to noticeably change the mean of the posterior distribution for `mu`? What does it take to noticeably change the posterior SD? Can you find values such that the true population mean of 3.4 is either less than the 2.5% percentile or greater than the 97.5% quantile?
+
+```{r}
+# Put code here
+stanData$priorMean <- log(30000)
+stanData$priorSD <- 2
+mod <- stan("meanLogInc.stan", data=stanData)
+
+print(mod)
+traceplot(mod)
+```
+```{r}
+# Put code here - try 2
+stanData$priorMean <- log(70000)
+stanData$priorSD <- 10
+mod <- stan("meanLogInc.stan", data=stanData)
+
+print(mod)
+traceplot(mod)
+```
+```{r}
+# Put code here - try 3
+stanData$priorMean <- log(15000)
+stanData$priorSD <- 1
+mod <- stan("meanLogInc.stan", data=stanData)
+
+print(mod)
+traceplot(mod)
+```
+```{r}
+# Put code here - try 4
+stanData$priorMean <- log(5000)
+stanData$priorSD <- 1
+mod <- stan("meanLogInc.stan", data=stanData)
+
+print(mod)
+traceplot(mod)
+```
+```{r}
+# Put code here - try 5
+stanData$priorMean <- log(500000)
+stanData$priorSD <- 0.1
+mod <- stan("meanLogInc.stan", data=stanData)
+
+print(mod)
+traceplot(mod)
+```
+Ans: To significantly change the 'mu' and SD, we can see when the priorMean was set too high and priorSD too low, the posterior mean changes drastically. This also results in shifting 3.4, the true population mean, to less than 2.5% percentile. 
+
+
+# Problem 2
+
+The IQR is a robust measure of the spread of a random variable, equal to the distance between its 0.75 and 0.25 quantiles. In R, you can calculate it with the `IQR()` function.
+
+A)  Using the full sample in `acsMASS.csv`, estimate the IQR of non-NA incomes.
+
+```{r}
+# Put code here
+income_IQR <- IQR(ourSample$income)
+print(income_IQR)
+
+boxplot(ourSample$income, main="Boxplot of Incomes", ylab="Income")
+```
+
+B)  Calculate the IQR of 1,000 bootstrap samples and inspect the distribution; does the bootstrap distribution look approximately normal?
+
+```{r}
+# Put code here
+nBootstrap <- 1000
+
+bootstrapIQRs <- numeric(nBootstrap)
+
+set.seed(42)
+
+for(i in 1:nBootstrap) {
+  bootstrapSample <- sample(ourSample$income, size = length(ourSample$income), replace=TRUE)
+  
+  bootstrapIQRs[i] <- IQR(bootstrapSample)
+}
+
+hist(bootstrapIQRs, main="Distribution of IQRs from Bootstrap samples")
+summary(bootstrapIQRs)
+```
+Ans: Yes, the bootstrap distribution looks approximately normal. 
+
+C)  Estimate the bootstrap standard error.
+
+```{r}
+# Put code here
+bootstrapSE <- sd(bootstrapIQRs)
+bootstrapSE
+```
+
+D)  Estimate the bootstrap pivotal 95% confidence interval for the IQR ($2\hat{\theta}-\hat{\theta}^*_{0.975}$, $2\hat{\theta}-\hat{\theta}^*_{0.025}$).
+
+```{r}
+# Put code here
+observedIQR <- IQR(ourSample$income)
+
+lower_percentile <- quantile(bootstrapIQRs, 0.025)
+upper_percentile <- quantile(bootstrapIQRs, 0.975)
+
+lower_bound <- 2*observedIQR - upper_percentile
+upper_bound <- 2*observedIQR - lower_percentile
+
+c(lower_bound, upper_bound)
+```
+
+How does it compare with a confidence interval assuming a normal sampling distribution, with bootstrap standard errors? (the "normal interval")
+
+```{r}
+# Put code here
+se.bs <- 3.509
+sample_IQR <- 55.05
+
+normal_ci_lower <- sample_IQR - 1.96*se.bs
+normal_ci_upper <- sample_IQR + 1.96*se.bs
+
+c(normal_ci_lower, normal_ci_upper)
+
+```
+
+# Problem 3
+
+Read in the `covid.csv` [dataset]() from HW1 with the following code (if `covid.csv` is saved in a different folder than this file, adjust the file path):
+
+```{r}
+covid <- read.csv("E:/WPI/Spring_2025/MA590_StatisticalMethodsForSocialAndBehaviouralScience/hw/1/covid.csv")
+```
+
+A public health researcher is interested in the relationship between the incidence of covid during the height of the pandemic and population density, and thinks that relationship may vary by state. They used the following code to estimate the Spearman correlation between county population density and covid incidence in August, 2020:
+
+```{r}
+st <- as.data.frame(t(
+  sapply(split(covid,covid$State),function(st){
+  ct <- cor.test(st$masksALWAYS,st$incAug,method="spearman",use="pairwise")
+  c(ct$estimate,pval=ct$p.value)})
+))
+```
+
+This resulted in the dataframe `st`. Here are its first few rows:
+
+```{r}
+head(st)
+```
+
+They would like to know if there are states for which we can be at least somewhat confident there is either a positive or negative correlation. Aware of the issue of multiple comparisons, they ask you for help. They specify that it's OK if not every state y'all identify has a true non-zero correlation, but they would hope that the direction of the correlation is right in 90% of identified states.
+
+Pick a p-value adjustment method and implement it here. For which states can you reject the null of no correlation? What are their estimated correlation coefficients?
+
+```{r}
+# Put code here
+st$adjusted_pval <- p.adjust(st$pval, method = "BH")
+
+reject_null <- st[st$adjusted_pval < 0.10,]
+
+reject_null
+```
+
+Why did you choose that method?
+Since Benjamini Hochberg method is commonly used to control the false discovery rate(FDR) in multiple comparisons. 
+
+B)  The two of you collaborate with another researcher who refuses to publish unless the probability of falsely rejecting any true null hypothesis in the paper is below 0.05. Can you satisfy that constraint? If so, implement it here, and provide a new list of states:
+
+```{r}
+# Put code here
+st$bonferroni_pval <- p.adjust(st$pval, method="bonferroni")
+
+significant_states_bonferroni <- st[st$bonferroni_pval < 0.05, ]
+
+significant_states_bonferroni
+```
+
+Explain your choice of adjustment method.
+Ans: Since Bonferroni adjustment is a conservative conservative method that controls the family wise error rate allowing for setting the bound (as specified by the researcher) for type I error of falsely rejecting any true null hypothesis.
+
+For either method, can you guess how the true correlations compare with the estimates for states with significant p-values? Do you think they are about the same, on average? Lower? Higher? Closer to zero? Explain.
+Ans: It is likely that the true correlations with significant p values would be lower than the estimated correlations, closer to zero depending on the data, sample size, noise, and overestimation in smaller samples. 

@@ -1,0 +1,233 @@
+---
+title: "PS 4"
+author: "Dinesh Kodwani"
+date: "2025-02-10"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages}
+for(pp in c("tidyverse","nnet","glmnet")) 
+  if(!is.element(pp,installed.packages()))
+    install.packages(pp)
+
+library(nnet)
+library(MASS)
+library(glmnet)
+library(sandwich)
+library(lmtest)
+```
+
+
+## Problem 1
+
+Download the file [gss.csv]() from [Canvas/files]() and read it into `R`. 
+
+```{r}
+## change the file path for your system
+gss <- read.csv("gss.csv")
+```
+
+This is a selection from the 2022 General Social Survey, which has all sorts of fascinating survey questions about respondents' lifestyles and political attitudes. This selection has six variables: `gender`, `party` (political party identification--`dem` for Democrat, `ind` for independent, and `rep` for Republican), `age`, `logIncome` (actually an ordinal variable---respondents selected from a list of categories---but let's pretend it's continuous), `region`, and `eqwealth`. Our focus is on `eqwealth`, an ordinal variable recording responses to a question about whether "the government should reduce income differences between the rich and the poor, perhaps by raising the taxes of wealthy families or by giving income assistance to the poor." The respondent could choose on a 1 to 7 scale, where 1 represents "should" and 7 represents "should not." 
+
+
+
+First, `eqwlth` needs to be coded as an ordered factor:
+```{r}
+gss$eqwlth <- factor(gss$eqwlth,levels=1:7,ordered=TRUE)
+```
+
+### A
+
+Use ordinal logistic regression (`polr` in the `MASS` package) to regress `eqwlth` on the other variables.
+Interpret the coefficient of `age`---if two people whose ages differed by one year were the same on the other predictors, how would the distributions of `eqwealth` differ between them?
+
+```{r}
+model <- polr(eqwlth ~ gender + party + age + LogIncome + region, data = gss)
+summary(model)
+
+```
+
+Interpretation of the coefficient on age:
+Coefficient on age = 0.01467, exp(0.01467)≈1.0148, suggests that with every one increase in age, it increases the odds of selecting a higher value on the eqwlth scale. This means older individuals are 1.48% more likely to favour higher values of eqwlth.  
+
+### B 
+Refit the previous model, including an interaction between `LogIncome` and `party` and inspect the results. How does the relationship between `LogIncome` and `eqwlth` differ for people with different party identifications? 
+
+```{r}
+model_interaction <- polr(eqwlth ~ gender + party*LogIncome + age + region, data=gss)
+summary(model_interaction)
+```
+Interpretation: The interaction term partyind:LogIncome with a coefficient of 0.21954 and t value higher than 2, tells us that party Independent's with a higher income are more likely to select a higher value on the eqwlth as compared to Democrats (reference group), meaning income has a stronger impact for Independents than Democrats. Further the term partyrep:LogIncome with coefficient 0.22439 and t value >2, tells us that income has a stronger impact for Republicans than the Democrats. Effect of income is more for both Independents and Republicans when compared to Democrats. 
+
+### C
+Compare the models' AIC values and use `anova()` to test the null hypothesis that the larger model fits no better than the smaller model (use $\alpha=0.05$). Which models do these criteria prefer? 
+
+```{r}
+AIC_small <- AIC(model)
+AIC_large <- AIC(model_interaction)
+
+cat("AIC for small model(model)", AIC_small, "\n")
+cat("AIC for large model(model_interactions)", AIC_large, "\n")
+
+anova_result <- anova(model, model_interaction, test="Chisq")
+print(anova_result)
+```
+Larger model (with interactions) fits better with lower AIC and Likelihood Ratio of 8.567537 with  p value lower than 0.05, so we reject the null hypothesis. 
+
+## Problem 2
+
+How do demographics predict party identification?
+Use multinomial regression to predict `party` as a function of `LogIncome`, `age`, `region`, and `gender`.
+
+```{r}
+multinomial_model <- multinom(party ~ LogIncome + age + region + gender, data=gss)
+summary(multinomial_model)
+```
+
+Interpret the `LogIncome` coefficients (why are there 2?)
+The following function may be helpful:
+```{r}
+multinomTable <- function(mod){
+  sss <- summary(mod)
+  ref <- sss$lab[1]
+  out <- lapply(seq(nrow(sss$coefficients)),
+                function(i) {
+                  coef=sss$coefficients[i,]
+                  se=sss$standard.errors[i,]
+                  cbind(coef=coef,se=se,p.approx=2*pnorm(-abs(coef/se)))
+                })
+  names(out) <- paste(sss$lab[-1],"vs",sss$lab[1])
+  out
+}
+```
+
+```{r}
+
+multinomTable(multinomial_model)
+```
+Interpretation: Since outcome variable party has more than 2 categories, the model is estimated for each coimparison between the non reference groups (Republicans and Independents) and the reference group (Democrats). For ind vs dem, we can see that coefficient of LogIncome is -0.20011775, which means that higher the income is associated with lower likelyhood of being identified as an Independent relative to Democrat. This has a high p value, suggesting coefficient is statistical significant. On the other hand, for rep vs dem, the coeffiecient of LogIncome is 0.079503332, suggesting that higher income is associated with slightly higher liklihood of identifying as Republican as compared to Democrat. Although, this has a p value higher than 0.05 suggesting coefficient is not statistically significant. 
+
+
+### B 
+Use the `predict` function (with `type="prob"`) to estimate the probabilities of each party identification for two 40-year-old, female-identifying, New-Englanders, one with an income of \$50,000 and one with an income of \$100,000.
+
+```{r}
+gss$region <- as.factor(gss$region)
+gss$gender <- as.factor(gss$gender)
+
+multinomial_model2 <- multinom(party~ LogIncome+age+region+gender, data=gss)
+new_data <- data.frame(
+  LogIncome = log(c(50000, 100000)),
+  age = c(40, 40), 
+  region = factor("new england", levels = levels(gss$region)),
+  gender = factor("female", levels = levels(gss$gender))
+)
+
+predicted_probs <- predict(multinomial_model2, new_data, type="prob")
+print(predicted_probs)
+```
+
+
+## Problem 3
+
+For this problem, use the `covid.csv` file [which is downloadable from Canvas]().
+
+```{r}
+covid <- read.csv("covid.csv")
+```
+
+As in a previous assignment, we want to model `incAug`, the August 2020 Covid incidence by county. This time, we will take three different approaches, and the only predictors will be `region`, `log(populationDensity)`, and `masksALWAYS`.
+
+### A) 
+`incAug` is a proportion--the number of recorded cases divided by the population. Therefore, it might be helpful to transform it with the logit function, $logit(p)=log(p/(1-p))$. Use OLS to model the logit of `incAug` as a function of `region`, `log(populationDensity)`, and `masksALWAYS`, use HC standard errors to estimate p-values, and assess model fit with a residual plot. Does the model fit well? If so, what can you conclude? What is the modeled relationship between the proportion of people claiming to "Always" wear masks and the odds of being infected in August?
+
+Use `simulate()` to simulate 100 vectors of `logit(incAug)` from the fitted model, and compare their estimated densities to the estimated density of actual `logit(incAug)`. 
+
+```{r}
+covid$logit_incAug <- log(covid$incAug / (1-covid$incAug))
+ols_model <- lm(logit_incAug~region+log(populationDensity)+masksALWAYS, data=covid)
+
+robust_se <- vcovHC(ols_model, type="HC")
+coeftest(ols_model, vonv = robust_se)
+
+plot(ols_model$fitted.values, residuals(ols_model),
+     xlab = "Fitted Values", ylab = "Residuals",
+     main = "Residual PLot")
+abline(h=0, col="red")
+
+simulated_data <- simulate(ols_model, nsim=100)
+plot(density(covid$logit_incAug), main = "Density Comparison",
+     xlab = "logit(incAug)", col="blue", lwd=2)
+for (i in 1:100) {
+  lines(density(simulated_data[,i]), col=rgb(1,0,0,0.1))
+}
+
+legend("topright", legend=c("Actual logit(incAug)", "Simulated logit(incAug"),
+       col = c("blue", "red"), lwd = c(2,1), cex=0.8)
+```
+The density comparison plot tells us that the model is a good fit, the model captures the general trend of the data. Although the residual plot shows they are not randomly scattered around the zero line, instead they appear to form clusters.
+The coefficient of masksALWAYS is -0.875989 suggesting that as proportion of people always wearing masks increase by 1 unit, the odds of being infected in August decrease by 0.876. Very small p value tells us that this is a statisctically significant relationship, meaning high evidence. 
+
+
+### B) 
+Recover the raw numbers of August infections and non-infections:
+```{r}
+covid$infectAug <- round(covid$incAug*covid$population)
+covid$nonInfectAug <- covid$population-covid$infectAug
+```
+Now use logistic or probit regression (your choice) for grouped data to model the numbers of infected and uninfected people in August by county. 
+Write down the model for the probability of getting infected in each county (i.e. $$Pr(infect|region, maskALWAYS,density)=...$$)
+Simulate 100 vectors of `infectAug` and `nonInfectAug` from the fitted model, and compare the estimated densities of `log(infectAug)` to the estimated density of actual `log(infectAug)`. (_Hint: `simulate` returns 2 columns for each simulation, but we're only interested in the first._) How does the fit look? 
+
+```{r}
+
+logit_model <- glm(cbind(infectAug, nonInfectAug) ~ region + log(populationDensity) + masksALWAYS,
+                   family=binomial(link="logit"), data=covid)
+
+simulated_data2 <- simulate(logit_model, nsim=100)
+log_infectAug_actual <- log(covid$infectAug)
+log_infectAug_simulated <- log(simulated_data2[, 1, drop=TRUE])
+hist(log_infectAug_actual, probability=TRUE, col=rgb(0,0,1,0.5),
+     main="Density of log(infectAug)", xlab="log(infectAug)", xlim=range(c(log_infectAug_actual, log_infectAug_simulated)))
+lines(density(log_infectAug_simulated), col="red", lwd=2)
+legend("topright", legend=c("Actual log(infectAug)", "Simulated log(infectAug)"),
+       col = c("blue", "red"), lwd=2)
+
+```
+
+The model is: The model seems to not fit well as we can see the simulated log(infectAug) values are bimodal, whereas actual log(infectAug) values are unimodal.
+
+### C)
+
+Now model the `infectAug` with a Poisson or Negative binomial GLM with a log link, with `log(population)` as an offset. What is the model for the expected number of infections? Assess model fit with simulation, as in the example code from class and parts (A) and (B). 
+
+```{r}
+poisson_model <- glm(infectAug ~ region + log(populationDensity) + masksALWAYS + offset(log(population)), family=poisson(link="log"), data=covid)
+
+simulated_data_poisson <- simulate(poisson_model, nsim=100)
+
+log_infectAugActual <- log(covid$infectAug)
+log_infectAugSimulated <- log(simulated_data_poisson[, 1, drop=TRUE])
+
+
+hist(log_infectAug_actual, probability = TRUE, col = rgb(0, 0, 1, 0.5),
+     main = "Density of log(infectAug)", xlab = "log(infectAug)", 
+     xlim = range(c(log_infectAug_actual, log_infectAugSimulated)))
+
+for (i in 1:100) {
+  lines(density(log(simulated_data_poisson[,i, drop = TRUE])), col=rgb(1, 0, 0, 0.1))
+}
+
+lines(density(log_infectAugSimulated), col = "red", lwd = 2)
+legend("topright", legend = c("Actual log(infectAug)", "Simulated log(infectAug)"),
+       col = c("blue", "red"), lwd = 2)
+
+```
+ 
+The model is: The model seems to be of a better fit, although the actual data is more spread than what the model produces.

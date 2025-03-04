@@ -1,0 +1,189 @@
+---
+title: "HW 5"
+author: "Dinesh J Kodwani"
+date: "2025-02-19"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message=FALSE,warning=FALSE)
+```
+
+```{r,results="hide",echo=TRUE,message=FALSE,warning=FALSE}
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(knitr)
+```
+**Content warning** This dataset deals with small children with a disease that was, at the time, terminal. If this is something you have a hard time thinking about (as I know I do!) feel free to assign some other interpretation to the variables in the dataset. 
+
+
+This homework is basically exercises 12.2-3 and 13.5 from "Data Analysis Using Regression and Multilevel/Hierarchical Models" by Andrew Gelman and Jennifer Hill. This problem set includes wanton (otherwise) unattributed quotes from the book. 
+
+For this problem set, we will use the file [cd4.csv]() which you can download from Canvas (I got it from [the book's website]()
+
+First, read in the dataset. 
+```{r}
+## change the file path for your system
+cd4 <- read_csv("cd4.csv")
+```
+Some data processing:
+```{r}
+cd4 <- cd4%>%
+  mutate(VDATE=parse_date(cd4$VDATE,"%m/%d/%Y"))%>%
+  group_by(newpid)%>%
+  mutate(time=as.numeric((VDATE-min(VDATE,na.rm=TRUE))/365))%>%
+  filter(!is.na(baseage)&!is.na(treatmnt))
+```
+
+The dataset has has CD4 percentages for a set of young children with HIV who
+were measured several times over a period of two years. The dataset also includes
+the ages of the children at each measurement.
+
+## 1)
+Write a model (in math) predicting CD4 percentage (`CD4PCT`) as a function of `time` (years since first visit) with varying
+intercepts across children (`newpid`). Fit using lmer() and interpret the coeﬃcient for
+time.
+
+**Solution**
+Model in math: CD4 percentage for time 'i' and  child 'j' is 
+$$\text{CD4PCT}_{ij} = \beta_0 + u_{0j} + \beta_1 \text{time}_{ij} + \epsilon_{ij}$$
+```{r}
+cd4_model <- lmer(CD4PCT ~ time + (1 | newpid), data=cd4)
+summary(cd4_model)
+```
+Interpreting the coefficients: 
+In fixed effects, (Intercept) tells us that average initial CD4 percentage across all children is 25.0160. Further, with every one unit increase in time, the CD4 percentage drops by -3.0082, this is statistially significant with p-value extremely small. 
+In random effects, variance of newpid (Intercept) tells us that groups of children's starting levels substantially vary by 129.32 units, with standard deviation of 11.37. Further the residual variance tells us that CD4 percentage varies by 53.25 units within each child which is an unexplained variation, with a standard deviation of 7.297.
+Correlation of fixed effects between (Intercept) and time of -0.312 tells us that children with higher initial CD4 levels tend to have a slightly slower decline in CD4 over time.
+
+## 2)
+Extend the model in (a) to include child-level predictors (that is, group-level
+predictors) for treatment (`treatmnt`) and age at baseline (`baseage`). Write out the model in math, fit using lmer(), and interpret
+the coeﬃcients on time, treatment, and age at baseline.
+
+**Solution**
+Model in math: CD4 percentage for time 'i' and  child 'j' is 
+$$\text{CD4PCT}_{ij} = \beta_0 + u_{0j} + \beta_1 \text{time}_{ij} + \beta_2 \text{treatment}_{j} + \beta_3 \text{baseage}_{j} + \epsilon_{ij}$$
+
+```{r}
+cd4_model_extended <- lmer(CD4PCT ~ time  + treatmnt + baseage + (1 | newpid), data=cd4)
+summary(cd4_model_extended)
+```
+Interpretation: 
+For Fixed effects- The average initial CD4 percentage at time=0 is 26.44. Time- On an average CD4 percentage declines by -2.9742 per year, and this is statistically significant. Treamtmnt- On an average, the children in treatment group have higher CD4 percentage by 1.24, although this is not statistically significant suggesting that there is no strong correlation here (with p value > 0.05). Baseage- On an average, older children have lower CD4 percentage, by -0.9519, and this is statistically significant with a p value of 0.00434. 
+
+For Random Effects- Variation of 125.13 (slightly lower than previous model, suggesting some individual differences in baseline are now explained) and std. dev. of 11.19 tells us that there is substantial difference in baseline CD4 levels across children. Whereas, residual having variance of 53.27 and std. dev. of 7.30 tells us there is still unexplained variation in CD4 levels within children over time. 
+
+Correlation of Fixed effects- Intercept and time coefficient of -0.095 tells us that there is almost no correlation between CD4 levels and rate of decline over time. For correlation with treatmnt of -0.849 suggests children who recieved treatment, have lower starting CD4 levels (although treatment effect is not statistically significant with p value>0.05). Further, correlation of baseage with intercept of -0.43 suggests that with every 1 unit increase in baseage, children have 0.43 units lower initial CD4 levels.
+
+## 3)
+Both the models in (1) and (2) estimate a separate intercept for each child. The intercepts in (1) are the sums of the global intercept and the random intercepts. The intercepts in (2) also include the effects of `baseage` and `treatmnt`. 
+
+Investigate the change in partial pooling from (a) to (b) both graphically, by plotting the child-intercepts against each other, and numerically, by comparing their standard deviations.
+
+(See [hlm.r]() lines 179-189)
+
+**Solution**
+
+```{r}
+child_intercepts_model1 <- fixef(cd4_model)["(Intercept)"] + ranef(cd4_model)$newpid[,1]
+child_intercepts_model2 <- fixef(cd4_model_extended)["(Intercept)"] + ranef(cd4_model_extended)$newpid[,1] + cd4 %>% distinct(newpid, treatmnt, baseage) %>% mutate(effect = treatmnt * fixef(cd4_model_extended)["treatmnt"] + baseage * fixef(cd4_model_extended)["baseage"]) %>% pull(effect)
+
+sd_model1 <- sd(ranef(cd4_model)$newpid[,1])
+sd_model2 <- sd(ranef(cd4_model_extended)$newpid[,1])
+
+cat("Std. dev. of random intercepts in Model (1):", sd_model1, "\n")
+cat("Std. dev. of random intercepts in Model(2):", sd_model2, "\n")
+
+plot(child_intercepts_model1 - mean(child_intercepts_model1),
+     child_intercepts_model2 - mean(child_intercepts_model2),
+     col = ifelse(cd4$treatmnt == 1, "red", "blue"),
+     xlab = "Intercepts from Model (1)",
+     ylab = "Intercepts from Model (2)", 
+     main = "Comparison of Child-Specific Intercepts")
+
+abline(0,1)
+abline(h=0, lty=2)
+```
+
+
+
+
+## 4)
+Extend the model in (2) to allow for slopes for the time predictor to vary between children (i.e. random slopes).
+
+### A)
+In math, write up the child-level part of the random slope model. Follow the notation of this expression of the measurement-level model:
+
+Let $c=1,\dots,250$ index children, so $c[i]$ is the child of measurement (i.e. row) $i$ of the dataset.
+$$CD4PCT=\beta_{0c}+\beta_{1c}time_i +\epsilon_i$$
+
+**Solution**
+$$CD4PCT=(\beta_{0} + u_{0c}) + (\beta_{1} + u_{1c})time_i + \beta_2 treatment_{c} + \beta_3 baseage_{c} + \epsilon_i$$
+
+### B 
+Fit the model using `lmer`, run `summary()`, and interpret the three `Std.Dev.` numbers and `Corr` from the `Random effects` portion
+
+**Solution**
+
+```{r}
+cd4_model_random_slope <- lmer(CD4PCT ~ time + treatmnt + baseage + (1 + time | newpid), data=cd4)
+summary(cd4_model_random_slope)
+```
+Intrepretation: Baselines CD4 levels vary across children with a std. dev. of 11.640, suggesting that some children start much higher or lower than the baseline. Looking at the std. dev. for time, 4.985, it tells us that rate of CD4 levels vary across children per year, some children decline faster whereas some slowly. Residual std. dev. of 6.869 suggest there is substantial variability which the  model has not been able to capture. The correlation of -0.29 between intercept and time means that children who start with higher CD4 levels tend to have a faster decline. 
+
+### C)
+Use `anova()` to test the null hypothesis that the standard deviation of `time` coefficients is 0. What can you conclude at $\alpha=0.05$?
+
+**Solution**
+
+```{r}
+cd4_mod_random_intercept <- lmer(CD4PCT ~ time + treatmnt + baseage + (1 | newpid), data=cd4, REML = FALSE)
+cd4_mod_random_slope <- lmer(CD4PCT ~ time + treatmnt + baseage + (1 + time | newpid), data=cd4, REML = FALSE)
+
+anova_results <- anova(cd4_mod_random_intercept, cd4_mod_random_slope)
+print(anova_results)
+kable(anova_results)
+```
+Interpretation: The p value is far lower than 0.05, confirming that rate of decline varies between children, therefore we reject the null hypothesis.
+
+## D)
+Without using the `predict` function (other than to check your work) what CD4 Percentage would you predict for the child with `newpid=1` at `time=2.5`?
+(hint: what are $\beta_{0c}$ and $\beta{1c}$ when $c=1$?)
+
+**Solution**
+
+```{r}
+fixed_effects <- fixef(cd4_mod_random_slope)
+
+random_effects <- ranef(cd4_mod_random_slope)$newpid["1",]
+
+child_data <- cd4 %>% filter(newpid == 1) %>% distinct(treatmnt, baseage)
+
+beta_0 <- fixed_effects["(Intercept)"]
+u_0c <- random_effects["(Intercept)"]
+beta_1 <- fixed_effects["time"]
+u_1c <- random_effects["time"]
+beta_2 <- fixed_effects["treatmnt"]
+beta_3 <- fixed_effects["baseage"]
+treatmnt_c <- child_data$treatmnt
+baseage_c <- child_data$baseage
+
+CD4PCT_predicted <- (beta_0 + u_0c) + (beta_1 + u_1c)*2.5 + beta_2*treatmnt_c + beta_3*baseage_c
+CD4PCT_predicted
+
+
+```
+
+```{r}
+newdata <- data.frame(
+  newpid = factor(1),
+  time = 2.5,
+  treatmnt = child_data$treatmnt,
+  baseage = child_data$baseage
+)
+
+predicted_val<- predict(cd4_mod_random_slope, newdata = newdata, allow.new.levels = TRUE)
+print(predicted_val)
+```

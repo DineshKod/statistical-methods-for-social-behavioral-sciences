@@ -1,0 +1,208 @@
+---
+title: "HW 3"
+author: "Dinesh J Kodwani"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,cache=TRUE)
+```
+
+```{r maybeInstall}
+for(p in c("lmtest","sandwich","glmnet","rstan"))
+  if(!is.element(p,installed.packages()))
+    install.packages(p)
+```
+
+```{r librarys,cache=FALSE}
+library(lmtest)
+library(sandwich)
+library(glmnet)
+library(rstan)
+```
+## The Dataset
+
+2-year community colleges in the US are inexpensive colleges that offer open admission and are designed to grant associates degrees after 2 years of study. Ideally, after earning an Associates degree, students transfer to traditional 4-year colleges. Rouse (1995) [[link to paper](https://www.jstor.org/stable/1392376?seq=1)] investigated the effect on educational attainment of enrolling at a 2-year college, as opposed to a 4-year college. 
+
+This is obviously a very trick causal question, and we will come back to the causal inference issues later. For now, let's say you want to regress `educ86`, overall educational attainment, on `twoyr`, which is equal to 1 if the student enrolled first in a 2-year college and 0 if they enrolled first in a 4-year college, plus other variables to control confounding. 
+
+Download the [dataset]() from Canvas (in [files]). 
+
+[put the appropriate file path below]:
+```{r}
+dat <- read.csv("communityCollege.csv")
+```
+With the exception of `twoyr` and `educ86`, all of the variables have been transformed so that they have a sample mean of 0, and their sample SDs are not _too_ different from each other. 
+
+## Problem 1
+Regress `educ86` on all of the other variables. Estimate $SE(\hat{\beta})$ in three ways---with the standard method (i.e. `summary()` in `R`), a heteroskedasticity robust sandwich estimator (i.e. using `coeftest` with `vcovHC`), and with the bootstrap. How to the standard error estimates compare (are they about the same or is/are one or two of the sets of SEs higher or lower)?
+
+```{r}
+# put code here
+mod <- lm(educ86 ~ ., data=dat)
+```
+Standard SEs:
+```{r}
+# put code here
+standard_se <- summary(mod)$coefficients
+```
+sandwich SES:
+```{r}
+# put code here
+robust_se <- coeftest(mod, vcov = vcovHC(mod, type = "HC3"))
+```
+Bootstrap:
+```{r}
+# put code here
+bootstrap_fn <- function(data, indices) {
+  boot_sample <- data[indices, ]
+  coef(lm(educ86 ~ ., data=boot_sample))
+}
+set.seed(123)
+n <- nrow(dat)
+B <- 1000
+bootstrap_coefs <- matrix(NA, nrow = B, ncol = length(coef(mod)))
+for (i in 1:B) {
+  sample_indices <- sample(1:n, size = n, replace = TRUE)
+  bootstrap_coefs[i, ] <- bootstrap_fn(dat, sample_indices)
+}
+
+bootstrap_se <- apply(bootstrap_coefs, 2, sd)
+
+
+cat("Standard SEs:\n")
+print(standard_se)
+
+cat("\nHeteroskedasticity-robust SEs:\n")
+print(robust_se)
+
+cat("\n Bootstrap SEs:\n")
+print(bootstrap_se)
+```
+Ans-> Overall, it seems as: standard SEs are the smallest, heteroskedasticity SEs are slightly higher (which tells us heteroskedasticity is present). And bootstrap SEs seem to be in line with heteroskedasticity SEs, with some variations. Bootstrap SEs confirm that hetereroskedasticity SEs provide a good approximation of the true variability in the estimates. 
+
+
+
+## Problem 2
+Use backwards selection based on the AIC to select a subset of the covariates. To ensure that `twoyr` remains in the model, include the argument `scope=list(lower=educ86~twoyr)` in the `step()` function. Which variables does it select? Use `anova()` to determine if you can reject the null hypothesis that the smaller model fits just as well as the larger model. 
+
+```{r back}
+# put code here
+mod2 <- lm(educ86~., data=dat)
+summary(mod2)
+
+reduced_model <- step(mod2, scope = list(lower=educ86~twoyr), direction = "backward")
+summary(reduced_model)
+
+anova(reduced_model, mod2)
+```
+Ans-> Here are the variables chosen after backward selection: twoyr + hispanic + bytest + dadsome + dadcoll + momvoc + 
+    momsome + momcoll + fincome + fincmiss + ownhome + perwhite. We made sure the predictor 'twoyr' would remain in the       model. Further, the high p value suggests no statistically significant difference between the redueced and the full       model (with all the variables), therefore we cannot reject the null hypothesis. 
+
+
+## Problem 3
+I know I said I didn't know how to include interactions with this algorithm, but here's a way: use forward selection starting with the output of the previous problem, selecting which 2-way interactions to include, based on the AIC. (hint: specify `scope=.~.^2`). Try it--what interactions are included? Use `anova()` to see if the interactions improved model fit significantly. Of the three models you've fit so far, which has the best AIC? Which has the best BIC?
+
+```{r}
+# put code here
+model_forward <- step(reduced_model, direction = "forward", scope=.~.^2)
+```   
+
+The interactions included are:
+```{r}
+# put code here
+summary(model_forward)
+```
+The interactions included are: strong evidence: twoyr:hispanic shows a positive interaction and twoyr:bytest shows a negative interavtion. Borderline significance, p values close to 0.05: dadsome:momcoll, hispanic:momsome and dadcoll:fincmiss. 
+
+The p-value for the null hypothesis that the interaction coefficients are all 0 is 0.0002--so, significant. 
+
+```{r}
+# put code here
+anova(mod2, reduced_model, model_forward)
+
+aic_mod2 <- AIC(mod2)
+bic_mod2 <- BIC(mod2)
+
+aic_backward_mod <- AIC(reduced_model)
+bic_backward_mod <- BIC(reduced_model)
+
+aic_forward_mod <- AIC(model_forward)
+bic_forward_mod <- BIC(model_forward)
+
+cat("Full model", "AIC: ", aic_mod2, "BIC: ", bic_mod2, "\n")
+cat("Backward model", "AIC: ", aic_backward_mod, "BIC: ", bic_backward_mod, "\n")
+cat("Forward model", "AIC: ", aic_forward_mod, "BIC: ", bic_forward_mod, "\n")
+```
+The interaction model has the best AIC, while the backwards selection model with interactions has the best BIC. 
+
+## Problem 3
+Use ridge regression (`glmnet` with `alpha=0`) and LASSO (`alpha=1`) to regress `educ86` on all of the main effects. Use the built-in cross-validation functions (`cv.glmnet`) to choose $\lambda$. To make sure `twoyr` stays in the model, use the option `penalty.factor=c(0,rep(1,ncol(X)-1))`. How do the lasso coefficients compare with the backwards selection model? How do the ridge coefficients compare with the full model? 
+
+```{r}
+# put code here
+y <- dat$educ86
+
+X <- dat[, -which(names(dat) == "educ86")]
+X <- as.data.frame(lapply(X, function(x) as.numeric(as.factor(x))))
+
+#ridge
+penalty_factor <- c(0, rep(1, ncol(X) - 1))
+ridge_model <- cv.glmnet(x = as.matrix(X), y=y, alpha=0, penalty.factor = penalty_factor)
+ridge_model$lambda.min
+ridge_model$cvm
+
+
+
+#lasso
+lasso_model <- cv.glmnet(x=as.matrix(X), y=y, alpha=1, penalty.factor=penalty_factor)
+
+lasso_model$lambda.min
+lasso_model$cvm
+
+
+
+
+```
+Ans-> Lasso vs backwards selection model: The backwards selection model seems to retain variables that have significant relation with the target. Backward selection model retained some variables which were eliminated by Lasso due to regularization. 
+Ridge vs full model: Ridge seems to shrink the coefficiants rather than eliminating them, whereas full model has larger coefficiants which can be prone to overfitting. 
+
+## Problem 4
+Use the bootstrap with bagging (see the code example from class, `regularizedRegress.r` to estimate coefficients and the standard errors for the `twoyr` coefficient for backwards selection, ridge regression, and LASSO. 
+
+```{r}
+# put code here
+set.seed(123)
+n_bootstraps <- 100
+twoyr_coefs <- data.frame(Backward = numeric(n_bootstraps),
+                          Ridge = numeric(n_bootstraps),
+                          Lasso = numeric(n_bootstraps))
+
+
+for (i in 1:n_bootstraps) {
+  boot_sample<- dat[sample(1:nrow(dat), replace=TRUE), ]
+  back_model <- lm(educ86 ~ twoyr + hispanic + bytest + dadsome + dadcoll + 
+                      momvoc + momsome + momcoll + fincome + fincmiss + ownhome + 
+                      perwhite, data = boot_sample)
+  
+  ridge_model <- cv.glmnet(as.matrix(boot_sample[, -which(names(boot_sample) == "educ86")]), 
+                           boot_sample$educ86, alpha = 0)
+  ridge_coef <- coef(ridge_model, s = "lambda.min")
+  twoyr_coefs$Ridge[i] <- ridge_coef["twoyr", ]
+  
+  lasso_model <- cv.glmnet(as.matrix(boot_sample[, -which(names(boot_sample) == "educ86")]), 
+                           boot_sample$educ86, alpha = 1)
+  lasso_coef <- coef(lasso_model, s = "lambda.min")
+  twoyr_coefs$Lasso[i] <- lasso_coef["twoyr", ]
+}
+
+
+coef_summary <- data.frame(
+  Model = c("Backward", "Ridge", "Lasso"),
+  Mean = colMeans(twoyr_coefs, na.rm = TRUE),
+  Std_Error = apply(twoyr_coefs, 2, sd, na.rm = TRUE)
+)
+
+print(coef_summary)
+
+```
